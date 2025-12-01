@@ -1,13 +1,13 @@
-import requests
-from bs4 import BeautifulSoup
 import os
 import time
-import urllib3
+import requests
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
-# SSL Uyarılarını Gizle (Terminal kirlenmesin diye)
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# --- 1. AYARLAR VE HEDEF LİSTESİ ---
+# --- 1. AYARLAR VE DEV HEDEF LİSTESİ (55+ Şirket) ---
 URL_LISTESI = [
     # --- 🇹🇷 TÜBİTAK VE AR-GE ENSTİTÜLERİ ---
     {"url": "https://kariyer.tubitak.gov.tr/giris.htm", "sirket": "TÜBİTAK Kariyer Portalı"},
@@ -83,9 +83,9 @@ URL_LISTESI = [
 
 # --- 2. TARAMA PARAMETRELERİ ---
 ARANACAK_KELIMELER = [
-    "staj", "intern", "part-time", "part time", "yarı zamanlı", 
-    "aday mühendis", "uzun dönem", "kısa dönem", "yetenek programı",
-    "genç yetenek", "early career", "student", "werkstudent", "trainee"
+    "staj", "intern", "part-time", "yarı zamanlı", 
+    "aday mühendis", "uzun dönem", "kısa dönem", 
+    "student", "werkstudent", "trainee", "yetenek"
 ]
 
 # GitHub Secrets
@@ -95,9 +95,9 @@ CHAT_ID = os.environ.get("CHAT_ID")
 # --- 3. FONKSİYONLAR ---
 def telegram_gonder(mesaj):
     if not TOKEN or not CHAT_ID:
-        print("HATA: Token veya Chat ID eksik!")
         return
     
+    # Telegram mesaj limiti (4096 karakter) kontrolü
     if len(mesaj) > 4000:
         mesaj = mesaj[:4000] + "\n... (Devamı kırpıldı)"
 
@@ -109,59 +109,65 @@ def telegram_gonder(mesaj):
     except Exception as e:
         print(f"Telegram Hatası: {e}")
 
-def siteyi_tarama():
-    print(f"🔍 Toplam {len(URL_LISTESI)} sanayi devi taranıyor...")
-    bulunanlar = []
+def tarayiciyi_baslat():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless") # Arayüzsüz mod (Sunucular için şart)
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920,1080")
+    # Gerçek kullanıcı gibi görünmek için User-Agent
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
-    # Daha gerçekçi bir tarayıcı taklidi (User-Agent)
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
-    }
+    service = Service(ChromeDriverManager().install())
+    return webdriver.Chrome(service=service, options=chrome_options)
 
-    sayac = 0
-    for hedef in URL_LISTESI:
-        sayac += 1
-        print(f"[{sayac}/{len(URL_LISTESI)}] {hedef['sirket']}...", end=" ")
-        
+def main():
+    print(f"🚀 Selenium motoru çalıştırılıyor... ({len(URL_LISTESI)} Dev Şirket)")
+    
+    driver = None
+    try:
+        driver = tarayiciyi_baslat()
+    except Exception as e:
+        print(f"❌ Tarayıcı başlatılamadı: {e}")
+        return
+
+    bulunanlar = []
+
+    for i, hedef in enumerate(URL_LISTESI, 1):
+        print(f"[{i}/{len(URL_LISTESI)}] {hedef['sirket']}...", end=" ", flush=True)
         try:
-            # verify=False -> SSL Sertifikasını kontrol etme (Hata çözücü)
-            # timeout=20 -> Yavaş siteler için süreyi uzattık
-            response = requests.get(hedef["url"], headers=headers, timeout=20, verify=False)
+            driver.get(hedef["url"])
+            # JavaScript'in yüklenmesi ve sitenin oturması için bekleme süresi
+            time.sleep(3) 
             
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'html.parser')
-                sayfa_metni = soup.get_text()
-                sayfa_metni = sayfa_metni.replace('İ', 'i').replace('I', 'ı').lower()
-                
-                kelime_bulundu = False
-                for kelime in ARANACAK_KELIMELER:
-                    if kelime in sayfa_metni:
-                        mesaj = f"✅ **{hedef['sirket']}** ({kelime}) bulundu!\n🔗 [Link]({hedef['url']})"
-                        bulunanlar.append(mesaj)
-                        print(f"--> BULUNDU! ({kelime})")
-                        kelime_bulundu = True
-                        break
-                
-                if not kelime_bulundu:
-                    print("Temiz.")
-            else:
-                print(f"⚠️ Erişim sorunu (Kod: {response.status_code})")
-
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+            metin = soup.get_text().lower().replace('i̇', 'i').replace('ı', 'i')
+            
+            kelime_bulundu = False
+            for kelime in ARANACAK_KELIMELER:
+                if kelime in metin:
+                    bulunanlar.append(f"✅ **{hedef['sirket']}** ({kelime})\n🔗 {hedef['url']}")
+                    print(f"--> BULUNDU! ({kelime})")
+                    kelime_bulundu = True
+                    break
+            
+            if not kelime_bulundu:
+                print("Temiz.")
+            
         except Exception as e:
-            # Hata mesajını kısaltarak yazdır
-            print(f"❌ Erişim Hatası")
+            print(f"❌ Hata: {str(e)[:100]}") # Hatayı kısaltarak göster
+
+    if driver:
+        driver.quit()
 
     if bulunanlar:
-        baslik = f"📢 **GÜNLÜK STAJ RAPORU ({len(bulunanlar)} İlan)**\n\n"
+        baslik = f"📢 **GELİŞMİŞ STAJ RAPORU ({len(bulunanlar)} İlan)**\n\n"
         icerik = "\n\n".join(bulunanlar)
         telegram_gonder(baslik + icerik)
-        print("\n🚀 Rapor Telegram'a gönderildi.")
+        print("✅ Rapor Telegram'a gönderildi.")
     else:
-        print("\n❌ Yeni ilan bulunamadı.")
+        print("❌ Yeni ilan bulunamadı.")
 
 if __name__ == "__main__":
-    siteyi_tarama()
+    main()
