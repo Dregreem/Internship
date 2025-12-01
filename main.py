@@ -6,36 +6,30 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 # --- 1. AYARLAR ---
-
-# Filtre Ayarları (Botun Zekası)
 ARANACAK_KELIMELER = [
     "staj", "intern", "part-time", "yarı zamanlı", 
     "aday mühendis", "uzun dönem", "kısa dönem", 
     "student", "werkstudent", "trainee", "yetenek"
 ]
 
-# BU KELİMELER VARSA BİLDİRİM ATMA (Eski İlan Savar)
 NEGATIF_KELIMELER = [
     "sona erdi", "sona ermiştir", "başvurular tamamlandı", 
     "kapandı", "kapanmıştır", "no longer accepting", "closed", 
     "süresi doldu", "yayından kaldırıldı",
-    "2023", "2024" # Eski yılları direk eliyoruz
+    "2023", "2024" 
 ]
 
-# --- HEDEF LİSTESİ (55+ Şirket) ---
+# --- HEDEF LİSTESİ ---
 URL_LISTESI = [
-    # --- 🇹🇷 TÜBİTAK VE AR-GE ---
     {"url": "https://kariyer.tubitak.gov.tr/giris.htm", "sirket": "TÜBİTAK Kariyer"},
     {"url": "https://sage.tubitak.gov.tr/tr/duyurular", "sirket": "TÜBİTAK SAGE"},
     {"url": "https://bilgem.tubitak.gov.tr/tr/kariyer", "sirket": "TÜBİTAK BİLGEM"},
     {"url": "https://uzay.tubitak.gov.tr/tr/duyurular", "sirket": "TÜBİTAK UZAY"},
     {"url": "https://mam.tubitak.gov.tr/tr/duyurular", "sirket": "TÜBİTAK MAM"},
     {"url": "https://rute.tubitak.gov.tr/tr/duyurular", "sirket": "TÜBİTAK RUTE"},
-
-    # --- 🛡️ SAVUNMA VE HAVACILIK ---
     {"url": "https://www.baykartech.com/tr/kariyer/acik-pozisyonlar/", "sirket": "Baykar"},
     {"url": "https://kariyer.tusas.com/ilanlar", "sirket": "TUSAŞ (TAI)"},
     {"url": "https://www.aselsan.com/tr/kariyer/acik-pozisyonlar", "sirket": "Aselsan"},
@@ -50,8 +44,6 @@ URL_LISTESI = [
     {"url": "https://www.kale.com.tr/kariyer", "sirket": "Kale Havacılık"},
     {"url": "https://turksh.com.tr/kariyer", "sirket": "TUSAŞ Helikopter"},
     {"url": "https://turkhizy.com/kariyer/", "sirket": "THY Teknik"},
-
-    # --- 🚗 OTOMOTİV ---
     {"url": "https://www.togg.com.tr/content/kariyer", "sirket": "Togg"},
     {"url": "https://live.fordotosan.com.tr/kariyer", "sirket": "Ford Otosan"},
     {"url": "https://kariyer.mercedes-benz.com.tr/", "sirket": "Mercedes-Benz"},
@@ -62,8 +54,6 @@ URL_LISTESI = [
     {"url": "https://www.turktraktor.com.tr/insan-kaynaklari/acik-pozisyonlar", "sirket": "Türk Traktör"},
     {"url": "https://www.karsan.com/tr/insan-kaynaklari/kariyer-firsatlari", "sirket": "Karsan"},
     {"url": "https://www.anadoluisuzu.com.tr/kariyer", "sirket": "Anadolu Isuzu"},
-
-    # --- 🤖 ROBOTİK & ENERJİ ---
     {"url": "https://jobs.siemens.com/careers?location=Turkey", "sirket": "Siemens TR"},
     {"url": "https://www.se.com/tr/tr/about-us/careers/job-opportunities.jsp", "sirket": "Schneider Electric"},
     {"url": "https://altinay.com/kariyer/", "sirket": "Altınay Robotik"},
@@ -73,8 +63,6 @@ URL_LISTESI = [
     {"url": "https://www.tupras.com.tr/kariyer", "sirket": "Tüpraş"},
     {"url": "https://www.petkim.com.tr/kariyer", "sirket": "Petkim"},
     {"url": "https://www.hidromek.com.tr/tr/insan-kaynaklari", "sirket": "Hidromek"},
-    
-    # --- 🚜 İŞ MAKİNELERİ & GIDA ---
     {"url": "https://www.sanko.com.tr/kariyer", "sirket": "Sanko Makina"},
     {"url": "https://www.caterpillar.com/en/careers/search-jobs.html", "sirket": "Caterpillar"},
     {"url": "https://cci.com.tr/tr/kariyer/kariyer-firsatlari", "sirket": "Coca-Cola"},
@@ -83,8 +71,6 @@ URL_LISTESI = [
     {"url": "https://www.unilever.com.tr/careers/", "sirket": "Unilever"},
     {"url": "https://www.pmi.com/careers/explore-our-job-opportunities", "sirket": "Philip Morris"},
     {"url": "https://tr.pg.com/kariyer/", "sirket": "P&G Türkiye"},
-
-    # --- 🧬 DİĞER DEVLER ---
     {"url": "https://www.meteksan.com/tr/kariyer/acik-pozisyonlar", "sirket": "Meteksan"},
     {"url": "https://www.abdiibrahim.com.tr/kariyer/is-ilanlari", "sirket": "Abdi İbrahim"},
     {"url": "https://www.gehealthcare.com.tr/hakkimizda/kariyer", "sirket": "GE HealthCare"},
@@ -107,7 +93,6 @@ def telegram_gonder(mesaj):
     except: pass
 
 def tarayici_baslat():
-    """DNS hatasız, güvenli tarayıcı ayarları"""
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
@@ -124,38 +109,57 @@ def tarayici_baslat():
     return driver
 
 def main():
-    print(f"🚀 AKILLI TARAMA BAŞLIYOR... ({len(URL_LISTESI)} Şirket)")
+    print(f"🚀 İNATÇI TARAMA BAŞLIYOR... ({len(URL_LISTESI)} Şirket)")
     bulunanlar = []
 
     driver = None
     try:
         driver = tarayici_baslat()
     except Exception as e:
-        print(f"❌ Driver hatası: {e}")
+        print(f"❌ Driver başlatılamadı: {e}")
         return
 
     for i, hedef in enumerate(URL_LISTESI, 1):
         print(f"[{i}/{len(URL_LISTESI)}] {hedef['sirket']}...", end=" ", flush=True)
-        try:
+        
+        # --- RETRY (YENİDEN DENEME) MEKANİZMASI ---
+        basarili = False
+        deneme_sayisi = 0
+        
+        while deneme_sayisi < 2 and not basarili: # En fazla 2 kere dene
+            deneme_sayisi += 1
             try:
                 driver.get(hedef["url"])
-                time.sleep(1) # Sayfa otursun diye kısa bekleme
-            except TimeoutException:
-                driver.execute_script("window.stop();")
-            except Exception:
-                try: driver.quit()
-                except: pass
-                driver = tarayici_baslat()
-                driver.get(hedef["url"])
+                basarili = True # Eğer buraya geldiyse hata vermemiştir
+                time.sleep(1)
+            except Exception as e:
+                # Hata aldıysak
+                if deneme_sayisi == 1:
+                    print("⚠️ (Hata aldı, tekrar deniyor...)", end=" ", flush=True)
+                    # Tarayıcıyı yenile ve biraz bekle
+                    try: driver.quit() 
+                    except: pass
+                    time.sleep(5) # 5 Saniye dinlen
+                    driver = tarayici_baslat()
+                else:
+                    # İkinci denemede de hata verirse yazdır ve geç
+                    print(f"❌ Ulaşılamadı ({str(e)[:30]})")
+        
+        if not basarili:
+            continue # Başarısızsa sonraki şirkete geç
 
+        # --- SAYFA ANALİZİ ---
+        try:
+            # Zaman aşımı durumunda sayfanın yüklendiği kadarını al
+            driver.execute_script("window.stop();") 
+            
             soup = BeautifulSoup(driver.page_source, "html.parser")
             metin = soup.get_text().lower().replace('i̇', 'i').replace('ı', 'i')
             
-            # --- FİLTRELEME MANTIĞI ---
             kelime_bulundu = False
             for kelime in ARANACAK_KELIMELER:
                 if kelime in metin:
-                    # Negatif kontrol (Eski ilan mı?)
+                    # Negatif kontrol
                     eski_mi = False
                     for negatif in NEGATIF_KELIMELER:
                         if negatif in metin:
@@ -164,9 +168,8 @@ def main():
                             break
                     
                     if eski_mi:
-                        break # Bu şirketi geç
+                        break
 
-                    # Temizse ekle
                     bulunanlar.append(f"✅ **{hedef['sirket']}** ({kelime})\n🔗 {hedef['url']}")
                     print(f"--> BULUNDU! ({kelime})")
                     kelime_bulundu = True
@@ -174,13 +177,9 @@ def main():
             
             if not kelime_bulundu:
                 print("Temiz.")
-
-        except Exception as e:
-            print(f"❌ Hata: {str(e)[:50]}")
-            try:
-                driver.quit()
-                driver = tarayici_baslat()
-            except: pass
+                
+        except Exception:
+            print("❌ Analiz Hatası")
 
     if driver:
         try: driver.quit()
