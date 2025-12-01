@@ -2,9 +2,12 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import time
+import urllib3
+
+# SSL Uyarılarını Gizle (Terminal kirlenmesin diye)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- 1. AYARLAR VE HEDEF LİSTESİ ---
-# Türkiye'nin en büyük sanayi ve teknoloji şirketlerinin kariyer sayfaları
 URL_LISTESI = [
     # --- 🇹🇷 TÜBİTAK VE AR-GE ENSTİTÜLERİ ---
     {"url": "https://kariyer.tubitak.gov.tr/giris.htm", "sirket": "TÜBİTAK Kariyer Portalı"},
@@ -80,83 +83,68 @@ URL_LISTESI = [
 
 # --- 2. TARAMA PARAMETRELERİ ---
 ARANACAK_KELIMELER = [
-    "staj", 
-    "intern", 
-    "part-time", 
-    "part time",
-    "yarı zamanlı", 
-    "aday mühendis", 
-    "uzun dönem", 
-    "kısa dönem",
-    "yetenek programı",
-    "genç yetenek",
-    "early career",
-    "student",
-    "werkstudent"
+    "staj", "intern", "part-time", "part time", "yarı zamanlı", 
+    "aday mühendis", "uzun dönem", "kısa dönem", "yetenek programı",
+    "genç yetenek", "early career", "student", "werkstudent", "trainee"
 ]
 
-# GitHub Secrets'tan alınacak şifreler
+# GitHub Secrets
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 # --- 3. FONKSİYONLAR ---
-
 def telegram_gonder(mesaj):
     if not TOKEN or not CHAT_ID:
-        print("HATA: Token veya Chat ID bulunamadı! (GitHub Secrets ayarlarını kontrol et)")
+        print("HATA: Token veya Chat ID eksik!")
         return
     
-    # Mesaj çok uzunsa bölme işlemi (Telegram limiti 4096 karakter)
     if len(mesaj) > 4000:
-        mesaj = mesaj[:4000] + "\n... (Mesajın devamı kırpıldı)"
+        mesaj = mesaj[:4000] + "\n... (Devamı kırpıldı)"
 
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID, 
-        "text": mesaj, 
-        "parse_mode": "Markdown", 
-        "disable_web_page_preview": True
-    }
+    payload = {"chat_id": CHAT_ID, "text": mesaj, "parse_mode": "Markdown", "disable_web_page_preview": True}
     
     try:
         requests.post(url, json=payload)
     except Exception as e:
-        print(f"Telegram gönderme hatası: {e}")
+        print(f"Telegram Hatası: {e}")
 
 def siteyi_tarama():
     print(f"🔍 Toplam {len(URL_LISTESI)} sanayi devi taranıyor...")
     bulunanlar = []
     
+    # Daha gerçekçi bir tarayıcı taklidi (User-Agent)
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
     }
 
     sayac = 0
     for hedef in URL_LISTESI:
         sayac += 1
-        print(f"[{sayac}/{len(URL_LISTESI)}] Kontrol: {hedef['sirket']}...", end=" ")
+        print(f"[{sayac}/{len(URL_LISTESI)}] {hedef['sirket']}...", end=" ")
         
         try:
-            # Sunucuları yormamak için her istek arasında 1 saniye bekle
-            time.sleep(1) 
-            response = requests.get(hedef["url"], headers=headers, timeout=15)
+            # verify=False -> SSL Sertifikasını kontrol etme (Hata çözücü)
+            # timeout=20 -> Yavaş siteler için süreyi uzattık
+            response = requests.get(hedef["url"], headers=headers, timeout=20, verify=False)
             
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'html.parser')
-                
-                # Türkçe karakter sorununu çözmek için özel işlem
                 sayfa_metni = soup.get_text()
                 sayfa_metni = sayfa_metni.replace('İ', 'i').replace('I', 'ı').lower()
                 
                 kelime_bulundu = False
                 for kelime in ARANACAK_KELIMELER:
                     if kelime in sayfa_metni:
-                        mesaj = f"✅ **{hedef['sirket']}** sitesinde '{kelime}' bulundu!\n🔗 [İlana Git]({hedef['url']})"
+                        mesaj = f"✅ **{hedef['sirket']}** ({kelime}) bulundu!\n🔗 [Link]({hedef['url']})"
                         bulunanlar.append(mesaj)
                         print(f"--> BULUNDU! ({kelime})")
                         kelime_bulundu = True
-                        break # Aynı sitede bir kelime bulmak yeterli
+                        break
                 
                 if not kelime_bulundu:
                     print("Temiz.")
@@ -164,16 +152,16 @@ def siteyi_tarama():
                 print(f"⚠️ Erişim sorunu (Kod: {response.status_code})")
 
         except Exception as e:
-            print(f"❌ Hata: {e}")
+            # Hata mesajını kısaltarak yazdır
+            print(f"❌ Erişim Hatası")
 
-    # --- RAPORLAMA ---
     if bulunanlar:
-        baslik = f"📢 **GÜNLÜK STAJ RAPORU ({len(bulunanlar)} Eşleşme)**\n\n"
+        baslik = f"📢 **GÜNLÜK STAJ RAPORU ({len(bulunanlar)} İlan)**\n\n"
         icerik = "\n\n".join(bulunanlar)
         telegram_gonder(baslik + icerik)
         print("\n🚀 Rapor Telegram'a gönderildi.")
     else:
-        print("\n❌ Bu taramada yeni ilan bulunamadı.")
+        print("\n❌ Yeni ilan bulunamadı.")
 
 if __name__ == "__main__":
     siteyi_tarama()
