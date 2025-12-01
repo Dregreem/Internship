@@ -1,15 +1,31 @@
 import os
 import time
 import requests
-import concurrent.futures
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException
 
-# --- 1. HEDEF LİSTESİ ---
+# --- 1. AYARLAR ---
+
+# Filtre Ayarları (Botun Zekası)
+ARANACAK_KELIMELER = [
+    "staj", "intern", "part-time", "yarı zamanlı", 
+    "aday mühendis", "uzun dönem", "kısa dönem", 
+    "student", "werkstudent", "trainee", "yetenek"
+]
+
+# BU KELİMELER VARSA BİLDİRİM ATMA (Eski İlan Savar)
+NEGATIF_KELIMELER = [
+    "sona erdi", "sona ermiştir", "başvurular tamamlandı", 
+    "kapandı", "kapanmıştır", "no longer accepting", "closed", 
+    "süresi doldu", "yayından kaldırıldı",
+    "2023", "2024" # Eski yılları direk eliyoruz
+]
+
+# --- HEDEF LİSTESİ (55+ Şirket) ---
 URL_LISTESI = [
     # --- 🇹🇷 TÜBİTAK VE AR-GE ---
     {"url": "https://kariyer.tubitak.gov.tr/giris.htm", "sirket": "TÜBİTAK Kariyer"},
@@ -79,12 +95,6 @@ URL_LISTESI = [
     {"url": "https://sisecam.com.tr/tr/kariyer", "sirket": "Şişecam"},
 ]
 
-ARANACAK_KELIMELER = [
-    "staj", "intern", "part-time", "yarı zamanlı", 
-    "aday mühendis", "uzun dönem", "kısa dönem", 
-    "student", "werkstudent", "trainee", "yetenek"
-]
-
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
@@ -96,80 +106,93 @@ def telegram_gonder(mesaj):
                       json={"chat_id": CHAT_ID, "text": mesaj, "parse_mode": "Markdown", "disable_web_page_preview": True}, timeout=10)
     except: pass
 
-def tarayici_yarat():
-    """Optimize edilmiş, hafif tarayıcı ayarları"""
+def tarayici_baslat():
+    """DNS hatasız, güvenli tarayıcı ayarları"""
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage") # Bellek taşmasını önler
+    chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--blink-settings=imagesEnabled=false") # Resimleri kapat
-    
-    # EAGER STRATEJİSİ: Sayfanın tamamen bitmesini bekleme, HTML gelince başla!
-    chrome_options.page_load_strategy = 'eager' 
-    
+    chrome_options.add_argument("--dns-prefetch-disable")
+    chrome_options.add_argument("--blink-settings=imagesEnabled=false")
+    chrome_options.page_load_strategy = 'eager'
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.set_page_load_timeout(30) # 30 saniye üst sınır
+    driver.set_page_load_timeout(30)
     return driver
 
-def siteyi_incele(hedef):
-    driver = None
-    sonuc = None
-    # print(f"⏳ Başlıyor: {hedef['sirket']}") # Log kirliliğini azaltmak için kapattım
-    
-    try:
-        driver = tarayici_yarat()
-        try:
-            driver.get(hedef["url"])
-            # Eager modunda olduğumuz için sleep'e gerek yok, element var mı diye bakarız
-            time.sleep(1) 
-        except TimeoutException:
-            # Zaman aşımı olsa bile driver.page_source dolu olabilir, devam et
-            driver.execute_script("window.stop();")
-        
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        metin = soup.get_text().lower().replace('i̇', 'i').replace('ı', 'i')
-        
-        for kelime in ARANACAK_KELIMELER:
-            if kelime in metin:
-                sonuc = f"✅ **{hedef['sirket']}** ({kelime})\n🔗 {hedef['url']}"
-                print(f"--> BULUNDU! {hedef['sirket']}")
-                break
-                
-    except Exception as e:
-        print(f"❌ Hata ({hedef['sirket']}): {str(e)[:50]}")
-    finally:
-        if driver: 
-            try: driver.quit()
-            except: pass
-        
-    return sonuc
-
 def main():
-    print(f"🚀 OPTİMİZE TARAMA BAŞLIYOR... ({len(URL_LISTESI)} Şirket)")
-    start_time = time.time()
+    print(f"🚀 AKILLI TARAMA BAŞLIYOR... ({len(URL_LISTESI)} Şirket)")
     bulunanlar = []
 
-    # MAX_WORKERS = 2 (Sunucuyu yormamak için düşürdük)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        results = executor.map(siteyi_incele, URL_LISTESI)
-        
-        for result in results:
-            if result:
-                bulunanlar.append(result)
+    driver = None
+    try:
+        driver = tarayici_baslat()
+    except Exception as e:
+        print(f"❌ Driver hatası: {e}")
+        return
 
-    duration = time.time() - start_time
-    print(f"\n🏁 Tarama tamamlandı! Süre: {duration:.2f} saniye")
+    for i, hedef in enumerate(URL_LISTESI, 1):
+        print(f"[{i}/{len(URL_LISTESI)}] {hedef['sirket']}...", end=" ", flush=True)
+        try:
+            try:
+                driver.get(hedef["url"])
+                time.sleep(1) # Sayfa otursun diye kısa bekleme
+            except TimeoutException:
+                driver.execute_script("window.stop();")
+            except Exception:
+                try: driver.quit()
+                except: pass
+                driver = tarayici_baslat()
+                driver.get(hedef["url"])
+
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+            metin = soup.get_text().lower().replace('i̇', 'i').replace('ı', 'i')
+            
+            # --- FİLTRELEME MANTIĞI ---
+            kelime_bulundu = False
+            for kelime in ARANACAK_KELIMELER:
+                if kelime in metin:
+                    # Negatif kontrol (Eski ilan mı?)
+                    eski_mi = False
+                    for negatif in NEGATIF_KELIMELER:
+                        if negatif in metin:
+                            print(f"🗑️ ESKİ ({negatif})")
+                            eski_mi = True
+                            break
+                    
+                    if eski_mi:
+                        break # Bu şirketi geç
+
+                    # Temizse ekle
+                    bulunanlar.append(f"✅ **{hedef['sirket']}** ({kelime})\n🔗 {hedef['url']}")
+                    print(f"--> BULUNDU! ({kelime})")
+                    kelime_bulundu = True
+                    break
+            
+            if not kelime_bulundu:
+                print("Temiz.")
+
+        except Exception as e:
+            print(f"❌ Hata: {str(e)[:50]}")
+            try:
+                driver.quit()
+                driver = tarayici_baslat()
+            except: pass
+
+    if driver:
+        try: driver.quit()
+        except: pass
 
     if bulunanlar:
-        baslik = f"📢 **GÜNLÜK STAJ RAPORU ({len(bulunanlar)} İlan)**\n\n"
+        baslik = f"📢 **GÜNCEL STAJ RAPORU ({len(bulunanlar)} İlan)**\n\n"
         icerik = "\n\n".join(bulunanlar)
         telegram_gonder(baslik + icerik)
+        print("\n✅ Rapor gönderildi.")
     else:
-        print("❌ Yeni ilan bulunamadı.")
+        print("\n❌ Yeni ve güncel ilan bulunamadı.")
 
 if __name__ == "__main__":
     main()
