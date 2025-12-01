@@ -1,9 +1,9 @@
-name: Günlük Staj Tarayıcı
+name: Günlük Staj Tarayıcı (Selenium)
 
 on:
   schedule:
-    - cron: '0 6,18 * * *' # Her gün sabah 09:00 ve akşam 21:00 (TSİ)
-  workflow_dispatch: # Manuel test butonu
+    - cron: '0 6,18 * * *' # Sabah 09:00 ve Akşam 21:00
+  workflow_dispatch:
 
 jobs:
   run-scraper:
@@ -18,8 +18,13 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Kütüphaneleri Yükle
-        run: pip install requests beautifulsoup4
+      - name: Chrome Tarayıcıyı Hazırla
+        uses: browser-actions/setup-chrome@latest
+
+      - name: Gerekli Kütüphaneleri Yükle
+        run: |
+          pip install selenium webdriver-manager requests beautifulsoup4
+
       - name: Botu Çalıştır
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
